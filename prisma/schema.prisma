@@ -1,0 +1,414 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ComponentType {
+  TPS
+  LITERASI
+}
+
+enum AnswerOption {
+  A
+  B
+  C
+  D
+  E
+}
+
+enum QuestionAnswerFormat {
+  MULTIPLE_CHOICE_SINGLE
+  SHORT_INPUT
+  MULTIPLE_CHOICE_COMPLEX
+}
+
+enum ShortAnswerType {
+  NUMERIC
+  TEXT
+}
+
+enum ExamSessionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  AUTO_SUBMITTED
+  EXPIRED
+}
+
+enum SectionProgressStatus {
+  LOCKED
+  ACTIVE
+  COMPLETED
+  SKIPPED_BY_TIMEOUT
+}
+
+enum ProctoringEventType {
+  TAB_HIDDEN
+  WINDOW_BLUR
+  WINDOW_FOCUS
+  FORCE_SUBMIT_TRIGGERED
+}
+
+enum UserRoleCode {
+  MASTER_ADMIN
+  ADMIN
+  PARTICIPANT
+}
+
+enum PermissionScopeType {
+  GLOBAL
+  SUB_TEST
+}
+
+enum AccessActionType {
+  ROLE_ASSIGNED
+  ROLE_REVOKED
+  PERMISSION_GRANTED
+  PERMISSION_REVOKED
+  USER_LOCKED
+  USER_UNLOCKED
+}
+
+enum PermissionCode {
+  QUESTION_CREATE
+  QUESTION_UPDATE
+  QUESTION_DELETE
+  QUESTION_VIEW_DRAFT
+  QUESTION_PUBLISH
+  QUESTION_REVIEW
+  SUBTEST_VIEW
+  EXAM_RESULT_VIEW
+  EXAM_RESULT_EXPORT
+  USER_VIEW
+  USER_SUSPEND
+  ADMIN_ROLE_ASSIGN
+  ADMIN_ROLE_REVOKE
+  ADMIN_PERMISSION_GRANT
+  ADMIN_PERMISSION_REVOKE
+  AUDIT_LOG_VIEW
+}
+
+model User {
+  id                String                @id @default(uuid())
+  fullName          String
+  email             String                @unique
+  passwordHash      String
+  isEmailVerified   Boolean               @default(false)
+  failedLoginCount  Int                   @default(0)
+  lockedUntil       DateTime?
+  lastLoginAt       DateTime?
+  permissionVersion Int                   @default(1)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  sessions                  ExamSession[]
+  authoredQuestions         Question[]            @relation("QuestionAuthor")
+  refreshTokens             RefreshToken[]
+  passwordResetTokens       PasswordResetToken[]
+  userRoles                 UserRole[]            @relation("UserRoleTarget")
+  assignedUserRoles         UserRole[]            @relation("UserRoleAssigner")
+  permissionScopes          UserPermissionScope[] @relation("PermissionScopeTarget")
+  grantedPermissionScopes   UserPermissionScope[] @relation("PermissionScopeGranter")
+  accessAuditLogsAsActor    AccessAuditLog[]      @relation("AccessAuditActor")
+  accessAuditLogsAsTarget   AccessAuditLog[]      @relation("AccessAuditTarget")
+  participantAccessTokens   ParticipantAccessToken[] @relation("ParticipantTokenOwner")
+  generatedParticipantTokens ParticipantAccessToken[] @relation("ParticipantTokenGenerator")
+}
+
+model ParticipantAccessToken {
+  id                String     @id @default(uuid())
+  tokenKey          String     @unique
+  tokenHash         String
+  label             String?
+  userId            String
+  generatedByUserId String
+  createdAt         DateTime   @default(now())
+  usedAt            DateTime?
+  usedByIp          String?
+  loginCount        Int        @default(0)
+  revokedAt         DateTime?
+
+  user         User          @relation("ParticipantTokenOwner", fields: [userId], references: [id], onDelete: Cascade)
+  generatedBy  User          @relation("ParticipantTokenGenerator", fields: [generatedByUserId], references: [id], onDelete: Restrict)
+  examSessions ExamSession[]
+
+  @@index([userId, revokedAt])
+  @@index([generatedByUserId, createdAt])
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String
+  userAgent  String?
+  ipAddress  String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model SubTest {
+  id         String          @id @default(uuid())
+  code       String          @unique
+  name       String
+  component  ComponentType
+  orderIndex Int
+  isActive   Boolean         @default(true)
+
+  questions       Question[]
+  sectionSchedule SectionSchedule?
+  scopedGrants    UserPermissionScope[]
+  accessAuditLogs AccessAuditLog[]
+
+  @@index([component])
+  @@index([orderIndex])
+}
+
+model Question {
+  id                     String               @id @default(uuid())
+  subTestId              String
+  createdById            String
+  promptText             String
+  materialTopic          String?
+  imageUrl               String?
+  imageUrls              Json?
+  isMathContent          Boolean               @default(false)
+  answerFormat           QuestionAnswerFormat @default(MULTIPLE_CHOICE_SINGLE)
+  optionA                String?
+  optionB                String?
+  optionC                String?
+  optionD                String?
+  optionE                String?
+  correctAnswer          AnswerOption?
+  // For complex multiple choice, store an array like ["A","C"] or statement keys in JSON.
+  complexCorrectJson     Json?
+  // For short input, use shortAnswerKey and optional numeric tolerance.
+  shortAnswerType        ShortAnswerType?
+  shortAnswerKey         String?
+  shortAnswerTolerance   Float?
+  shortAnswerCaseSensitive Boolean?          @default(false)
+  discussion             String
+  isActive               Boolean              @default(true)
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+
+  subTest   SubTest      @relation(fields: [subTestId], references: [id], onDelete: Restrict)
+  createdBy User         @relation("QuestionAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  attempts  ExamAttempt[]
+
+  @@index([subTestId])
+  @@index([isActive])
+}
+
+model ExamSession {
+  id                   String            @id @default(uuid())
+  userId               String
+  participantAccessTokenId String?
+  currentQuestionId    String?
+  participantName      String?
+  participantCongregation String?
+  participantSchool    String?
+  termsAcceptedAt      DateTime?
+  status               ExamSessionStatus @default(NOT_STARTED)
+  startedAt            DateTime?
+  submittedAt          DateTime?
+  totalDurationSeconds Int               @default(11700)
+  warningCount         Int               @default(0)
+  forceSubmitted       Boolean           @default(false)
+  currentSectionOrder  Int               @default(1)
+  scoreSummaryJson     Json?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  user              User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  participantToken  ParticipantAccessToken?  @relation(fields: [participantAccessTokenId], references: [id], onDelete: SetNull)
+  attempts          ExamAttempt[]
+  sectionProgresses SessionSectionProgress[]
+  proctoringEvents  ProctoringEvent[]
+
+  @@index([userId, status])
+  @@index([participantAccessTokenId])
+  @@index([createdAt])
+}
+
+model ExamAttempt {
+  id                 String    @id @default(uuid())
+  examSessionId      String
+  questionId         String
+  // Single-choice answer.
+  selectedAnswer     AnswerOption?
+  // Short input answer.
+  shortAnswerText    String?
+  // Complex answer selection (e.g. ["A","C"] or statement keys).
+  selectedAnswersJson Json?
+  isCorrect          Boolean?
+  answeredAt         DateTime?
+  timeSpentSeconds   Int?
+  discussionSnapshot String?
+
+  examSession ExamSession @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+  question    Question    @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([examSessionId, questionId])
+  @@index([examSessionId])
+  @@index([questionId])
+}
+
+model SectionSchedule {
+  id                 String  @id @default(uuid())
+  subTestId          String  @unique
+  orderIndex         Int     @unique
+  durationSeconds    Int
+  label              String?
+  isLockedNavigation Boolean @default(true)
+  isActive           Boolean @default(true)
+
+  subTest             SubTest                   @relation(fields: [subTestId], references: [id], onDelete: Restrict)
+  sessionProgresses   SessionSectionProgress[]
+
+  @@index([isActive])
+}
+
+model SessionSectionProgress {
+  id                          String                @id @default(uuid())
+  examSessionId               String
+  sectionScheduleId           String
+  status                      SectionProgressStatus @default(LOCKED)
+  startedAt                   DateTime?
+  endedAt                     DateTime?
+  remainingSecondsAtLastSync  Int
+  autoAdvanced                Boolean               @default(false)
+
+  examSession    ExamSession     @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+  sectionSchedule SectionSchedule @relation(fields: [sectionScheduleId], references: [id], onDelete: Restrict)
+
+  @@unique([examSessionId, sectionScheduleId])
+  @@index([examSessionId, status])
+}
+
+model ProctoringEvent {
+  id            String             @id @default(uuid())
+  examSessionId String
+  eventType     ProctoringEventType
+  warningNumber Int?
+  metadataJson  Json?
+  occurredAt    DateTime           @default(now())
+
+  examSession ExamSession @relation(fields: [examSessionId], references: [id], onDelete: Cascade)
+
+  @@index([examSessionId, occurredAt])
+}
+
+model Role {
+  id          String    @id @default(uuid())
+  code        UserRoleCode @unique
+  name        String
+  description String?
+  createdAt   DateTime  @default(now())
+
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+}
+
+model Permission {
+  id          String        @id @default(uuid())
+  code        PermissionCode @unique
+  name        String
+  description String?
+  createdAt   DateTime      @default(now())
+
+  rolePermissions      RolePermission[]
+  userPermissionScopes UserPermissionScope[]
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model UserRole {
+  id               String    @id @default(uuid())
+  userId           String
+  roleId           String
+  assignedByUserId String?
+  assignedAt       DateTime  @default(now())
+  revokedAt        DateTime?
+
+  user           User   @relation("UserRoleTarget", fields: [userId], references: [id], onDelete: Cascade)
+  role           Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  assignedByUser User?  @relation("UserRoleAssigner", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId, revokedAt])
+  @@index([roleId, revokedAt])
+}
+
+model UserPermissionScope {
+  id              String              @id @default(uuid())
+  userId          String
+  permissionId    String
+  scopeType       PermissionScopeType
+  subTestId       String?
+  grantedByUserId String?
+  expiresAt       DateTime?
+  createdAt       DateTime            @default(now())
+  revokedAt       DateTime?
+
+  user          User        @relation("PermissionScopeTarget", fields: [userId], references: [id], onDelete: Cascade)
+  permission    Permission  @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  subTest       SubTest?    @relation(fields: [subTestId], references: [id], onDelete: Cascade)
+  grantedByUser User?       @relation("PermissionScopeGranter", fields: [grantedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId, permissionId, revokedAt])
+  @@index([scopeType, subTestId])
+}
+
+model AccessAuditLog {
+  id                   String              @id @default(uuid())
+  actorUserId          String?
+  actionType           AccessActionType
+  targetUserId         String?
+  targetRoleCode       UserRoleCode?
+  targetPermissionCode PermissionCode?
+  scopeType            PermissionScopeType?
+  subTestId            String?
+  reason               String?
+  beforeJson           Json?
+  afterJson            Json?
+  occurredAt           DateTime            @default(now())
+
+  actorUser  User?    @relation("AccessAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  targetUser User?    @relation("AccessAuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  subTest    SubTest? @relation(fields: [subTestId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId, occurredAt])
+  @@index([targetUserId, occurredAt])
+}
