@@ -12,7 +12,7 @@ export class AccessService {
 
   private generateTokenKey(): string {
     const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    const tokenLength = randomInt(0, 2) === 0 ? 6 : 7;
+    const tokenLength = 6;
     let key = '';
     for (let i = 0; i < tokenLength; i += 1) {
       const idx = randomInt(0, alphabet.length);

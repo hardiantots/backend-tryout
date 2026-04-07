@@ -285,9 +285,36 @@ export class ExamService {
     });
 
     if (!existing) {
+      const latestCompleted = await this.prisma.examSession.findFirst({
+        where: {
+          userId: requesterUserId,
+          status: {
+            in: [ExamSessionStatus.SUBMITTED, ExamSessionStatus.AUTO_SUBMITTED, ExamSessionStatus.EXPIRED],
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        select: {
+          id: true,
+          status: true,
+          submittedAt: true,
+          warningCount: true,
+        },
+      });
+
       return {
         success: true,
         resumed: false,
+        hasCompletedSession: Boolean(latestCompleted),
+        latestCompletedSession: latestCompleted
+          ? {
+              examSessionId: latestCompleted.id,
+              status: latestCompleted.status,
+              submittedAt: latestCompleted.submittedAt,
+              warningCount: latestCompleted.warningCount,
+            }
+          : null,
       };
     }
 

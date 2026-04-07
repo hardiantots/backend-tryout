@@ -12,6 +12,8 @@ import { LoginDto } from './dto/login.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly participantTokenPattern = /^[A-HJ-NP-Z2-9]{6}$/;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
@@ -36,30 +38,20 @@ export class AuthService {
   }
 
   private extractParticipantTokenKey(rawToken: string): string {
-    const trimmed = rawToken.trim();
-    if (!trimmed) {
+    const normalized = rawToken.trim().toUpperCase();
+    if (!normalized) {
       throw new UnauthorizedException('Format token participant tidak valid.');
     }
 
-    // Legacy compatibility: PTK-<key>-<secret>
-    if (trimmed.startsWith('PTK-')) {
-      const parts = trimmed.split('-');
-      const legacyKey = parts[1]?.trim();
-      if (!legacyKey) {
-        throw new UnauthorizedException('Format token participant tidak valid.');
-      }
-      return legacyKey.toUpperCase();
+    if (!this.participantTokenPattern.test(normalized)) {
+      throw new UnauthorizedException('Format token participant tidak valid. Gunakan 6 karakter kombinasi huruf/angka.');
     }
 
-    return trimmed.toUpperCase();
+    return normalized;
   }
 
   private normalizeSubmittedParticipantToken(rawToken: string): string {
-    const trimmed = rawToken.trim();
-    if (trimmed.startsWith('PTK-')) {
-      return trimmed;
-    }
-    return trimmed.toUpperCase();
+    return this.extractParticipantTokenKey(rawToken);
   }
 
   async validateParticipantToken(rawToken: string) {

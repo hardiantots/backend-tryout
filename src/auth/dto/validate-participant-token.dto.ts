@@ -1,7 +1,8 @@
-import { IsString, MinLength } from 'class-validator';
+import { IsString, MaxLength, MinLength } from 'class-validator';
 
 export class ValidateParticipantTokenDto {
   @IsString()
-  @MinLength(12)
+  @MinLength(6)
+  @MaxLength(6)
   token!: string;
 }
