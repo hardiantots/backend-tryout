@@ -24,7 +24,7 @@ pids/
 # Environment files
 .env
 .env.*
-!.env.example
+.env_prod
 
 # TypeScript cache
 *.tsbuildinfo
