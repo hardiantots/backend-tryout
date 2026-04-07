@@ -481,4 +481,54 @@ export class QuestionService {
       question: updated,
     };
   }
+
+  async deleteQuestion(actorUserId: string, questionId: string) {
+    const [user, existing] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: actorUserId } }),
+      this.prisma.question.findUnique({ where: { id: questionId } }),
+    ]);
+
+    if (!user) {
+      throw new NotFoundException('Actor user not found.');
+    }
+
+    if (!existing) {
+      throw new NotFoundException('Question not found.');
+    }
+
+    const effective = await this.accessService.getEffectivePermissions(actorUserId);
+    const allowed = this.hasScopedPermission(effective as any, PermissionCode.QUESTION_DELETE, existing.subTestId);
+
+    if (!allowed) {
+      throw new ForbiddenException('You do not have QUESTION_DELETE permission for this sub-test scope.');
+    }
+
+    if (!existing.isActive) {
+      return {
+        success: true,
+        deleted: true,
+        alreadyDeleted: true,
+        questionId: existing.id,
+      };
+    }
+
+    const deleted = await this.prisma.question.update({
+      where: { id: existing.id },
+      data: {
+        isActive: false,
+      },
+      select: {
+        id: true,
+        subTestId: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      success: true,
+      deleted: true,
+      question: deleted,
+    };
+  }
 }

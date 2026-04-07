@@ -3,6 +3,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthUser } from '../common/types/auth-user.type';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateQuestionDto } from './dto/create-question.dto';
+import { DeleteQuestionDto } from './dto/delete-question.dto';
 import { ListQuestionsDto } from './dto/list-questions.dto';
 import { RequestUploadUrlDto } from './dto/request-upload-url.dto';
 import { UpdateQuestionDto } from './dto/update-question.dto';
@@ -31,6 +32,11 @@ export class QuestionController {
   @Post('update')
   async updateQuestion(@CurrentUser() user: AuthUser, @Body() dto: UpdateQuestionDto) {
     return this.questionService.updateQuestion(user.sub, dto);
+  }
+
+  @Post('delete')
+  async deleteQuestion(@CurrentUser() user: AuthUser, @Body() dto: DeleteQuestionDto) {
+    return this.questionService.deleteQuestion(user.sub, dto.questionId);
   }
 
   @Post('upload-url')
