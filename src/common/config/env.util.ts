@@ -7,7 +7,7 @@ export function getRequiredEnv(name: string): string {
 }
 
 export function getAllowedCorsOrigins(): string[] {
-  const raw = process.env.APP_ORIGINS?.trim();
+  const raw = (process.env.APP_ORIGINS ?? process.env.FRONTEND_URL)?.trim();
   if (!raw) {
     return [];
   }
@@ -35,8 +35,13 @@ export function validateRequiredEnvForProduction() {
     return;
   }
 
-  const required = ['DATABASE_URL', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'APP_ORIGINS'];
+  const required = ['DATABASE_URL', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'];
   for (const key of required) {
     getRequiredEnv(key);
+  }
+
+  const hasCorsOrigins = Boolean((process.env.APP_ORIGINS ?? process.env.FRONTEND_URL)?.trim());
+  if (!hasCorsOrigins) {
+    throw new Error('Missing required environment variable: APP_ORIGINS (or FRONTEND_URL).');
   }
 }

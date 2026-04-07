@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { AccessModule } from './access/access.module';
@@ -11,6 +12,10 @@ import { QuestionModule } from './question/question.module';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ['.env.production', '.env'],
+    }),
     ThrottlerModule.forRoot([{
       ttl: 60000,
       limit: 300, // Global limit: 300 req per minute per IP (raised for 100 concurrent users)

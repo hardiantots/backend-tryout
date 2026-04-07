@@ -272,9 +272,10 @@ export class QuestionService {
       throw new BadRequestException('Only JPG, PNG, and WEBP images are allowed.');
     }
 
-    const maxBytes = 5 * 1024 * 1024;
+    const parsedMax = Number(process.env.MAX_FILE_SIZE ?? 5 * 1024 * 1024);
+    const maxBytes = Number.isFinite(parsedMax) && parsedMax > 0 ? Math.floor(parsedMax) : 5 * 1024 * 1024;
     if (dto.sizeBytes > maxBytes) {
-      throw new BadRequestException('Image size exceeds 5MB limit.');
+      throw new BadRequestException(`Image size exceeds ${(maxBytes / (1024 * 1024)).toFixed(2)}MB limit.`);
     }
 
     const safeName = dto.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
