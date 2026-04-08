@@ -4,7 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import * as express from 'express';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { getAllowedCorsOrigins, isCorsOriginAllowed, validateRequiredEnvForProduction } from './common/config/env.util';
+import { validateRequiredEnvForProduction } from './common/config/env.util';
 
 async function bootstrap() {
   validateRequiredEnvForProduction();
@@ -20,8 +20,6 @@ async function bootstrap() {
       .set('trust proxy', Number.isNaN(numericTrustProxy) ? trustProxyRaw === 'true' : numericTrustProxy);
   }
 
-  const allowedOrigins = getAllowedCorsOrigins();
-
   app.use(helmet());
   app.use(express.json({ limit: '256kb' }));
 
@@ -34,18 +32,9 @@ async function bootstrap() {
   );
 
   app.enableCors({
-    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      if (isCorsOriginAllowed(origin, allowedOrigins)) {
-        callback(null, true);
-        return;
-      }
-      callback(new Error('Origin is not allowed by CORS.'));
-    },
+    origin: '*', // Untuk tahap testing tanpa domain, ini yang paling aman
     credentials: true,
-    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    optionsSuccessStatus: 204,
-    maxAge: 600,
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
   });
 
   // Enable graceful shutdown for EC2 restarts / deployments
