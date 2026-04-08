@@ -40,6 +40,12 @@ export function validateRequiredEnvForProduction() {
     getRequiredEnv(key);
   }
 
+  getRequiredEnv('AWS_REGION');
+  const hasScoringQueueUrl = Boolean(process.env.AWS_SQS_SCORING_QUEUE_URL?.trim() || process.env.AWS_SQS_QUEUE_URL?.trim());
+  if (!hasScoringQueueUrl) {
+    throw new Error('Missing required environment variable: AWS_SQS_SCORING_QUEUE_URL (or AWS_SQS_QUEUE_URL).');
+  }
+
   const hasCorsOrigins = Boolean((process.env.APP_ORIGINS ?? process.env.FRONTEND_URL)?.trim());
   if (!hasCorsOrigins) {
     throw new Error('Missing required environment variable: APP_ORIGINS (or FRONTEND_URL).');

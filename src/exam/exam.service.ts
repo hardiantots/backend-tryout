@@ -9,12 +9,16 @@ import { StartSessionDto } from './dto/start-session.dto';
 import { SubmitAttemptDto } from './dto/submit-attempt.dto';
 import { ExamSessionStatus, ProctoringEventType } from './exam.types';
 import { QuestionAnswerFormat, ShortAnswerType } from '../question/question.types';
+import { ScoringQueueService } from './scoring/scoring-queue.service';
 
 const VIOLATION_TYPES: ProctoringEventType[] = [ProctoringEventType.TAB_HIDDEN, ProctoringEventType.WINDOW_BLUR];
 
 @Injectable()
 export class ExamService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly scoringQueueService: ScoringQueueService,
+  ) {}
 
   private getServerRemainingSeconds(progress: {
     startedAt: Date | null;
@@ -881,12 +885,10 @@ export class ExamService {
     };
   }
 
-  async scoreSession(dto: ScoreSessionDto, requesterUserId: string) {
-    await this.assertSessionOwner(dto.examSessionId, requesterUserId);
-
+  private async calculateAndPersistScoreSummary(examSessionId: string) {
     const attempts = await this.prisma.examAttempt.findMany({
       where: {
-        examSessionId: dto.examSessionId,
+        examSessionId,
       },
       include: {
         question: {
@@ -996,7 +998,7 @@ export class ExamService {
     const totalAnswered = Object.values(summary).reduce((sum, item) => sum + item.answered, 0);
 
     await this.prisma.examSession.update({
-      where: { id: dto.examSessionId },
+      where: { id: examSessionId },
       data: {
         scoreSummaryJson: {
           bySubTest: summary,
@@ -1011,17 +1013,36 @@ export class ExamService {
     });
 
     return {
-      success: true,
-      examSessionId: dto.examSessionId,
-      scoreSummary: {
-        bySubTest: summary,
-        weakMaterials,
-        totals: {
-          correct: totalCorrect,
-          answered: totalAnswered,
-          wrong: totalAnswered - totalCorrect,
-        },
+      bySubTest: summary,
+      weakMaterials,
+      totals: {
+        correct: totalCorrect,
+        answered: totalAnswered,
+        wrong: totalAnswered - totalCorrect,
       },
+    };
+  }
+
+  async processScoreSessionJob(examSessionId: string, requesterUserId: string) {
+    await this.assertSessionOwner(examSessionId, requesterUserId);
+    return this.calculateAndPersistScoreSummary(examSessionId);
+  }
+
+  async scoreSession(dto: ScoreSessionDto, requesterUserId: string) {
+    await this.assertSessionOwner(dto.examSessionId, requesterUserId);
+
+    const enqueued = await this.scoringQueueService.enqueueScoreSessionJob({
+      examSessionId: dto.examSessionId,
+      requesterUserId,
+      requestedAt: new Date().toISOString(),
+    });
+
+    return {
+      success: true,
+      queued: true,
+      examSessionId: dto.examSessionId,
+      message: 'Jawaban kamu sedang diproses, hasilnya akan segera muncul.',
+      queueMessageId: enqueued.messageId,
     };
   }
 
@@ -1038,13 +1059,13 @@ export class ExamService {
       });
     }
 
-    const score = await this.scoreSession({ examSessionId }, requesterUserId);
+    const scoreSummary = await this.calculateAndPersistScoreSummary(examSessionId);
     const reviewItems = await this.buildReviewItems(examSessionId);
 
     return {
       success: true,
       examSessionId,
-      scoreSummary: score.scoreSummary,
+      scoreSummary,
       reviewItems,
       participantProfile: await this.prisma.examSession.findUnique({
         where: { id: examSessionId },
@@ -1264,7 +1285,7 @@ export class ExamService {
     // If no score summary, try scoring it first
     if (!session.scoreSummaryJson) {
       try {
-        await this.scoreSession({ examSessionId: session.id }, requesterUserId);
+        await this.calculateAndPersistScoreSummary(session.id);
         const updated = await this.prisma.examSession.findUnique({
           where: { id: session.id },
           select: { scoreSummaryJson: true },
