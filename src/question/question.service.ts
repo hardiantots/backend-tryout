@@ -1,11 +1,8 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { randomUUID } from 'crypto';
 import { PermissionCode } from '../access/access.types';
 import { AccessService } from '../access/access.service';
-import { getRequiredEnv } from '../common/config/env.util';
 import { PrismaService } from '../prisma/prisma.service';
+import { S3Service } from '../s3/s3.service';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { ListQuestionsDto } from './dto/list-questions.dto';
 import { RequestUploadUrlDto } from './dto/request-upload-url.dto';
@@ -14,23 +11,11 @@ import { QuestionAnswerFormat, ShortAnswerType } from './question.types';
 
 @Injectable()
 export class QuestionService {
-  private readonly s3Region = process.env.AWS_REGION;
-  private readonly s3Bucket = process.env.AWS_S3_BUCKET;
-
-  private s3Client: S3Client | null = null;
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly accessService: AccessService,
+    private readonly s3Service: S3Service,
   ) {}
-
-  private getS3Client(): S3Client {
-    if (!this.s3Client) {
-      const region = getRequiredEnv('AWS_REGION');
-      this.s3Client = new S3Client({ region });
-    }
-    return this.s3Client;
-  }
 
   private canCreateQuestionForSubTest(
     effective: {
@@ -278,31 +263,19 @@ export class QuestionService {
       throw new BadRequestException(`Image size exceeds ${(maxBytes / (1024 * 1024)).toFixed(2)}MB limit.`);
     }
 
-    const safeName = dto.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const bucket = this.s3Bucket ?? getRequiredEnv('AWS_S3_BUCKET');
-    const region = this.s3Region ?? getRequiredEnv('AWS_REGION');
-    const objectKey = `questions/${dto.subTestId}/${Date.now()}-${randomUUID()}-${safeName}`;
-
-    const command = new PutObjectCommand({
-      Bucket: bucket,
-      Key: objectKey,
-      ContentType: mime,
-      CacheControl: 'public, max-age=31536000, immutable',
+    const { uploadUrl, publicUrl, objectKey, expiresInSeconds } = await this.s3Service.generateQuestionUploadUrl({
+      subTestId: dto.subTestId,
+      fileName: dto.fileName,
+      mimeType: mime,
+      expiresInSeconds: 300,
     });
-
-    const uploadUrl = await getSignedUrl(this.getS3Client(), command, { expiresIn: 300 });
-    const publicBase = process.env.AWS_S3_PUBLIC_BASE_URL?.trim();
-    const encodedKey = objectKey.split('/').map(encodeURIComponent).join('/');
-    const publicUrl = publicBase
-      ? `${publicBase.replace(/\/$/, '')}/${encodedKey}`
-      : `https://${bucket}.s3.${region}.amazonaws.com/${encodedKey}`;
 
     return {
       success: true,
       uploadUrl,
       publicUrl,
       objectKey,
-      expiresInSeconds: 300,
+      expiresInSeconds,
       maxSizeBytes: maxBytes,
     };
   }
