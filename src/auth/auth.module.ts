@@ -11,8 +11,10 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   imports: [
     AccessModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
-    JwtModule.register({
-      secret: getRequiredEnv('JWT_ACCESS_SECRET'),
+    JwtModule.registerAsync({
+      useFactory: () => ({
+        secret: getRequiredEnv('JWT_ACCESS_SECRET'),
+      }),
     }),
   ],
   controllers: [AuthController],

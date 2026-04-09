@@ -3,7 +3,6 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import * as express from 'express';
 import helmet from 'helmet';
-import { AppModule } from './app.module';
 import { loadSecretsFromSsm } from './common/config/ssm-secrets.util';
 import { validateRequiredEnvForProduction } from './common/config/env.util';
 
@@ -11,6 +10,7 @@ async function bootstrap() {
   await loadSecretsFromSsm();
   validateRequiredEnvForProduction();
 
+  const { AppModule } = await import('./app.module');
   const app = await NestFactory.create(AppModule);
 
   const trustProxyRaw = process.env.TRUST_PROXY?.trim();
