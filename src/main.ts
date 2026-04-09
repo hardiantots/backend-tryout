@@ -13,6 +13,11 @@ async function bootstrap() {
   const { AppModule } = await import('./app.module');
   const app = await NestFactory.create(AppModule);
 
+  // Setarakan prefix dengan frontend (biasanya /api)
+  app.setGlobalPrefix('api', {
+    exclude: ['health'],
+  });
+
   const trustProxyRaw = process.env.TRUST_PROXY?.trim();
   if (trustProxyRaw) {
     const numericTrustProxy = Number(trustProxyRaw);
@@ -34,7 +39,7 @@ async function bootstrap() {
   );
 
   app.enableCors({
-    origin: '*', // Untuk tahap testing tanpa domain, ini yang paling aman
+    origin: 'https://tryout-ppgt-kmt.vercel.app', // Untuk tahap testing tanpa domain, ini yang paling aman
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
   });
