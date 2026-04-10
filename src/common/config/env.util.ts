@@ -35,7 +35,7 @@ export function validateRequiredEnvForProduction() {
     return;
   }
 
-  const required = ['DATABASE_URL', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'];
+  const required = ['DATABASE_URL', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'AWS_S3_BUCKET'];
   for (const key of required) {
     getRequiredEnv(key);
   }

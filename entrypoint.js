@@ -1,33 +1,50 @@
 // entrypoint.js
-const { SSMClient, GetParametersByPathCommand } = require("@aws-sdk/client-ssm");
+// Pre-loads all secrets from AWS SSM Parameter Store before NestJS boots.
+// Required because EC2 instance does not use .env files in production.
+const { SSMClient, GetParametersByPathCommand } = require('@aws-sdk/client-ssm');
 
 async function startApp() {
-  console.log("⏳ Pre-loading secrets from AWS SSM...");
-  
-  const ssmClient = new SSMClient({ region: "ap-southeast-2" });
-  const basePath = "/project-tryout/prod/backend/";
+  const region = process.env.AWS_REGION || 'ap-southeast-2';
+  const basePath = process.env.AWS_SSM_PARAMETER_PATH || '/project-tryout/prod/backend/';
+  const normalizedPath = basePath.endsWith('/') ? basePath : `${basePath}/`;
+
+  console.log(`⏳ Loading secrets from AWS SSM path: ${normalizedPath}`);
+
+  const ssmClient = new SSMClient({ region });
+  let nextToken;
+  let loaded = 0;
 
   try {
-    const command = new GetParametersByPathCommand({
-      Path: basePath,
-      WithDecryption: true,
-      Recursive: true,
-    });
+    do {
+      const response = await ssmClient.send(
+        new GetParametersByPathCommand({
+          Path: normalizedPath,
+          WithDecryption: true,
+          Recursive: true,
+          NextToken: nextToken,
+        }),
+      );
 
-    const response = await ssmClient.send(command);
-    
-    response.Parameters.forEach(param => {
-      const key = param.Name.replace(basePath, "");
-      process.env[key] = param.Value;
-      // console.log(`✅ Loaded: ${key}`); // Aktifkan hanya untuk debug
-    });
+      for (const param of response.Parameters ?? []) {
+        const key = param.Name?.replace(normalizedPath, '').trim();
+        if (key && param.Value) {
+          process.env[key] = param.Value;
+          loaded += 1;
+        }
+      }
 
-    console.log("🚀 Secrets loaded. Starting NestJS...");
-    
-    // BARU panggil file dist/main.js hasil build
-    require("./dist/src/main"); 
+      nextToken = response.NextToken;
+    } while (nextToken);
+
+    // Set NODE_ENV sebelum NestJS boot agar validasi env dan guard SSM berjalan benar
+    if (!process.env.NODE_ENV) {
+      process.env.NODE_ENV = 'production';
+    }
+
+    console.log(`✅ ${loaded} secret(s) loaded. Starting NestJS (NODE_ENV=${process.env.NODE_ENV})...`);
+    require('./dist/src/main');
   } catch (error) {
-    console.error("❌ Failed to load secrets:", error);
+    console.error('❌ Failed to load secrets from SSM:', error);
     process.exit(1);
   }
 }

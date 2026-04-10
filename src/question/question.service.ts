@@ -263,7 +263,7 @@ export class QuestionService {
       throw new BadRequestException(`Image size exceeds ${(maxBytes / (1024 * 1024)).toFixed(2)}MB limit.`);
     }
 
-    const { uploadUrl, publicUrl, objectKey, expiresInSeconds } = await this.s3Service.generateQuestionUploadUrl({
+    const { uploadUrl, publicUrl, objectKey, expiresInSeconds } = await this.s3Service.generateUploadUrl({
       subTestId: dto.subTestId,
       fileName: dto.fileName,
       mimeType: mime,

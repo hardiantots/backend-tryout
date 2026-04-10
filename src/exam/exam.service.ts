@@ -565,9 +565,10 @@ export class ExamService {
 
     const questionsWithSignedUrls = await Promise.all(
       subTest.questions.map(async (q) => {
-        const rawImageUrls = Array.isArray(q.imageUrls) ? q.imageUrls : q.imageUrl ? [q.imageUrl] : [];
-        const signedImageUrl = await this.s3Service.getFileUrl(q.imageUrl);
-        const signedImageUrls = await Promise.all(rawImageUrls.map((u) => this.s3Service.getFileUrl(u as string)));
+        const rawImageUrls: string[] = Array.isArray(q.imageUrls) ? (q.imageUrls as string[]) : q.imageUrl ? [q.imageUrl] : [];
+        const [signedImageUrl, ...signedImageUrls] = await this.s3Service.getSignedFileUrls(
+          [q.imageUrl, ...rawImageUrls],
+        );
 
         return {
           id: q.id,
@@ -712,9 +713,14 @@ export class ExamService {
           (attempt?.shortAnswerText != null && attempt.shortAnswerText.trim().length > 0) ||
           (Array.isArray(attempt?.selectedAnswersJson) && attempt.selectedAnswersJson.length > 0);
 
-        const rawImageUrls = Array.isArray(question.imageUrls) ? question.imageUrls : question.imageUrl ? [question.imageUrl] : [];
-        const signedImageUrl = await this.s3Service.getFileUrl(question.imageUrl);
-        const signedImageUrls = await Promise.all(rawImageUrls.map((u) => this.s3Service.getFileUrl(u as string)));
+        const rawImageUrls: string[] = Array.isArray(question.imageUrls)
+          ? (question.imageUrls as string[])
+          : question.imageUrl
+            ? [question.imageUrl]
+            : [];
+        const [signedImageUrl, ...signedImageUrls] = await this.s3Service.getSignedFileUrls(
+          [question.imageUrl, ...rawImageUrls],
+        );
 
         return {
           attemptId: attempt?.id ?? `UNANSWERED-${question.id}`,
