@@ -1,9 +1,24 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, UserRoleCode } from '@prisma/client';
 import * as argon2 from 'argon2';
+import { loadSecretsFromSsm } from '../src/common/config/ssm-secrets.util';
 
-const prisma = new PrismaClient();
+let prisma: PrismaClient;
 
 async function main() {
+  console.log('⏳ Memuat konfigurasi dari AWS SSM...');
+  
+  // Karena utilitas SSM aplikasi akan skip jika bukan production,
+  // kita paksa sementara state env ini ke production agar kredensial ditarik di EC2.
+  if (!process.env.NODE_ENV || process.env.NODE_ENV !== 'production') {
+    if (!process.env.DATABASE_URL) {
+      process.env.NODE_ENV = 'production';
+    }
+  }
+
+  await loadSecretsFromSsm();
+
+  prisma = new PrismaClient();
+
   console.log('⏳ Menyiapkan data Master Admin...');
 
   const email = 'hardiantotandiseno@gmail.com';
@@ -13,7 +28,7 @@ async function main() {
   const passwordHash = await argon2.hash(plainPassword);
 
   // 2. Pastikan enum MASTER_ADMIN ada di tabel Role
-  const roleCode = 'MASTER_ADMIN';
+  const roleCode = UserRoleCode.MASTER_ADMIN;
   const roleName = 'Master Admin';
 
   const role = await prisma.role.upsert({
@@ -76,5 +91,7 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    if (prisma) {
+      await prisma.$disconnect();
+    }
   });

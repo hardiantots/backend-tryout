@@ -10,6 +10,7 @@ import { SubmitAttemptDto } from './dto/submit-attempt.dto';
 import { ExamSessionStatus, ProctoringEventType } from './exam.types';
 import { QuestionAnswerFormat, ShortAnswerType } from '../question/question.types';
 import { ScoringQueueService } from './scoring/scoring-queue.service';
+import { S3Service } from '../s3/s3.service';
 
 const VIOLATION_TYPES: ProctoringEventType[] = [ProctoringEventType.TAB_HIDDEN, ProctoringEventType.WINDOW_BLUR];
 
@@ -18,6 +19,7 @@ export class ExamService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly scoringQueueService: ScoringQueueService,
+    private readonly s3Service: S3Service,
   ) {}
 
   private getServerRemainingSeconds(progress: {
@@ -561,49 +563,59 @@ export class ExamService {
 
     const attemptMap = new Map(attempts.map((a) => [a.questionId, a]));
 
+    const questionsWithSignedUrls = await Promise.all(
+      subTest.questions.map(async (q) => {
+        const rawImageUrls = Array.isArray(q.imageUrls) ? q.imageUrls : q.imageUrl ? [q.imageUrl] : [];
+        const signedImageUrl = await this.s3Service.getFileUrl(q.imageUrl);
+        const signedImageUrls = await Promise.all(rawImageUrls.map((u) => this.s3Service.getFileUrl(u as string)));
+
+        return {
+          id: q.id,
+          promptText: q.promptText,
+          materialTopic: q.materialTopic,
+          imageUrl: signedImageUrl,
+          imageUrls: signedImageUrls.filter(Boolean),
+          isMathContent: q.isMathContent,
+          answerFormat: q.answerFormat,
+          options: {
+            A: q.optionA,
+            B: q.optionB,
+            C: q.optionC,
+            D: q.optionD,
+            E: q.optionE,
+          },
+          complexStatements:
+            q.answerFormat === QuestionAnswerFormat.MULTIPLE_CHOICE_COMPLEX
+              ? Array.isArray((q.complexCorrectJson as any)?.statements)
+                ? ((q.complexCorrectJson as any).statements as unknown[]).map((item) => String(item))
+                : [q.optionC, q.optionD, q.optionE].filter((item): item is string => Boolean(item))
+              : undefined,
+          complexChoiceLabels:
+            q.answerFormat === QuestionAnswerFormat.MULTIPLE_CHOICE_COMPLEX
+              ? {
+                  left: String((q.complexCorrectJson as any)?.labels?.left ?? q.optionA ?? 'Benar'),
+                  right: String((q.complexCorrectJson as any)?.labels?.right ?? q.optionB ?? 'Salah'),
+                }
+              : undefined,
+          shortAnswerType: q.shortAnswerType,
+          savedAnswer: attemptMap.get(q.id)
+            ? {
+                selectedAnswer: attemptMap.get(q.id)?.selectedAnswer,
+                shortAnswerText: attemptMap.get(q.id)?.shortAnswerText,
+                selectedAnswers: attemptMap.get(q.id)?.selectedAnswersJson,
+              }
+            : null,
+        };
+      })
+    );
+
     return {
       success: true,
       examSessionId,
       isFinished: false,
       warningCount: active.warningCount ?? 0,
       activeSection: active.activeSection,
-      questions: subTest.questions.map((q) => ({
-        id: q.id,
-        promptText: q.promptText,
-        materialTopic: q.materialTopic,
-        imageUrl: q.imageUrl,
-        imageUrls: Array.isArray(q.imageUrls) ? q.imageUrls : q.imageUrl ? [q.imageUrl] : [],
-        isMathContent: q.isMathContent,
-        answerFormat: q.answerFormat,
-        options: {
-          A: q.optionA,
-          B: q.optionB,
-          C: q.optionC,
-          D: q.optionD,
-          E: q.optionE,
-        },
-        complexStatements:
-          q.answerFormat === QuestionAnswerFormat.MULTIPLE_CHOICE_COMPLEX
-            ? Array.isArray((q.complexCorrectJson as any)?.statements)
-              ? ((q.complexCorrectJson as any).statements as unknown[]).map((item) => String(item))
-              : [q.optionC, q.optionD, q.optionE].filter((item): item is string => Boolean(item))
-            : undefined,
-        complexChoiceLabels:
-          q.answerFormat === QuestionAnswerFormat.MULTIPLE_CHOICE_COMPLEX
-            ? {
-                left: String((q.complexCorrectJson as any)?.labels?.left ?? q.optionA ?? 'Benar'),
-                right: String((q.complexCorrectJson as any)?.labels?.right ?? q.optionB ?? 'Salah'),
-              }
-            : undefined,
-        shortAnswerType: q.shortAnswerType,
-        savedAnswer: attemptMap.get(q.id)
-          ? {
-              selectedAnswer: attemptMap.get(q.id)?.selectedAnswer,
-              shortAnswerText: attemptMap.get(q.id)?.shortAnswerText,
-              selectedAnswers: attemptMap.get(q.id)?.selectedAnswersJson,
-            }
-          : null,
-      })),
+      questions: questionsWithSignedUrls,
     };
   }
 
@@ -692,28 +704,36 @@ export class ExamService {
 
     const attemptMap = new Map(attempts.map((item) => [item.questionId, item]));
 
-    return questions.map((question, index) => {
-      const attempt = attemptMap.get(question.id);
-      const isAnswered =
-        attempt?.selectedAnswer != null ||
-        (attempt?.shortAnswerText != null && attempt.shortAnswerText.trim().length > 0) ||
-        (Array.isArray(attempt?.selectedAnswersJson) && attempt.selectedAnswersJson.length > 0);
+    return Promise.all(
+      questions.map(async (question, index) => {
+        const attempt = attemptMap.get(question.id);
+        const isAnswered =
+          attempt?.selectedAnswer != null ||
+          (attempt?.shortAnswerText != null && attempt.shortAnswerText.trim().length > 0) ||
+          (Array.isArray(attempt?.selectedAnswersJson) && attempt.selectedAnswersJson.length > 0);
 
-      return {
-        attemptId: attempt?.id ?? `UNANSWERED-${question.id}`,
-        questionId: question.id,
-        subTestCode: question.subTest.code,
-        subTestName: question.subTest.name,
-        materialTopic: question.materialTopic,
-        questionText: question.promptText,
-        answerFormat: question.answerFormat,
-        sequence: index + 1,
-        userAnswer: this.formatAnswer(question, attempt),
-        correctAnswer: this.formatCorrectAnswer(question),
-        isCorrect: isAnswered ? (attempt?.isCorrect ?? null) : null,
-        discussion: question.discussion,
-      };
-    });
+        const rawImageUrls = Array.isArray(question.imageUrls) ? question.imageUrls : question.imageUrl ? [question.imageUrl] : [];
+        const signedImageUrl = await this.s3Service.getFileUrl(question.imageUrl);
+        const signedImageUrls = await Promise.all(rawImageUrls.map((u) => this.s3Service.getFileUrl(u as string)));
+
+        return {
+          attemptId: attempt?.id ?? `UNANSWERED-${question.id}`,
+          questionId: question.id,
+          subTestCode: question.subTest.code,
+          subTestName: question.subTest.name,
+          materialTopic: question.materialTopic,
+          questionText: question.promptText,
+          answerFormat: question.answerFormat,
+          sequence: index + 1,
+          imageUrl: signedImageUrl,
+          imageUrls: signedImageUrls.filter(Boolean),
+          userAnswer: this.formatAnswer(question, attempt),
+          correctAnswer: this.formatCorrectAnswer(question),
+          isCorrect: isAnswered ? (attempt?.isCorrect ?? null) : null,
+          discussion: question.discussion,
+        };
+      })
+    );
   }
 
   private evaluateAttempt(question: any, attempt: SubmitAttemptDto): boolean {

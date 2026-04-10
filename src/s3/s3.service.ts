@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { PutObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import { getRequiredEnv } from '../common/config/env.util';
@@ -50,5 +50,35 @@ export class S3Service {
       objectKey,
       expiresInSeconds,
     };
+  }
+
+  async getFileUrl(fileUrl: string | null | undefined, expiresInSeconds = 3600): Promise<string | null> {
+    if (!fileUrl) return null;
+    
+    // Only sign URLs that are actually hosted on our S3
+    const bucket = getRequiredEnv('AWS_S3_BUCKET');
+    const region = getRequiredEnv('AWS_REGION');
+    
+    try {
+      const urlObj = new URL(fileUrl);
+      
+      // Typical AWS S3 path starts after hostname: e.g /questions/sub-test...
+      if (urlObj.hostname.includes('amazonaws.com') || urlObj.hostname.includes('idcloudhost')) {
+        const objectKey = decodeURIComponent(urlObj.pathname.slice(1));
+        
+        const command = new GetObjectCommand({
+          Bucket: bucket,
+          Key: objectKey,
+        });
+
+        return await getSignedUrl(this.getClient(), command, { expiresIn: expiresInSeconds });
+      }
+      
+      // If it doesn't match our S3 endpoints, return raw
+      return fileUrl;
+    } catch {
+      // If it's a relative URL or parsing fails, return raw
+      return fileUrl;
+    }
   }
 }
