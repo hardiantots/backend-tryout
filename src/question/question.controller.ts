@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { DeleteQuestionDto } from './dto/delete-question.dto';
 import { ListQuestionsDto } from './dto/list-questions.dto';
+import { ReorderQuestionsDto } from './dto/reorder-questions.dto';
 import { RequestUploadUrlDto } from './dto/request-upload-url.dto';
 import { UpdateQuestionDto } from './dto/update-question.dto';
 import { QuestionService } from './question.service';
@@ -42,5 +43,10 @@ export class QuestionController {
   @Post('upload-url')
   async getUploadUrl(@CurrentUser() user: AuthUser, @Body() dto: RequestUploadUrlDto) {
     return this.questionService.getQuestionImageUploadUrl(user.sub, dto);
+  }
+
+  @Post('reorder')
+  async reorderQuestions(@CurrentUser() user: AuthUser, @Body() dto: ReorderQuestionsDto) {
+    return this.questionService.reorderQuestions(user.sub, dto);
   }
 }

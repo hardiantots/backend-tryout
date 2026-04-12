@@ -543,7 +543,7 @@ export class ExamService {
       include: {
         questions: {
           where: { isActive: true },
-          orderBy: { createdAt: 'asc' },
+          orderBy: [{ orderIndex: 'asc' }, { createdAt: 'asc' }],
         },
       },
     });
@@ -696,7 +696,7 @@ export class ExamService {
         include: {
           subTest: true,
         },
-        orderBy: [{ subTest: { orderIndex: 'asc' } }, { createdAt: 'asc' }],
+        orderBy: [{ subTest: { orderIndex: 'asc' } }, { orderIndex: 'asc' }, { createdAt: 'asc' }],
       }),
       this.prisma.examAttempt.findMany({
         where: { examSessionId },

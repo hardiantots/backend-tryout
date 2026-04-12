@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { S3Service } from '../s3/s3.service';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { ListQuestionsDto } from './dto/list-questions.dto';
+import { ReorderQuestionsDto } from './dto/reorder-questions.dto';
 import { RequestUploadUrlDto } from './dto/request-upload-url.dto';
 import { UpdateQuestionDto } from './dto/update-question.dto';
 import { QuestionAnswerFormat, ShortAnswerType } from './question.types';
@@ -17,28 +18,6 @@ export class QuestionService {
     private readonly s3Service: S3Service,
   ) {}
 
-  private canCreateQuestionForSubTest(
-    effective: {
-      permissions: string[];
-      scopes: Record<string, { global: boolean; subTestIds: string[] }>;
-    },
-    subTestId: string,
-  ) {
-    if (!effective.permissions.includes(PermissionCode.QUESTION_CREATE)) {
-      return false;
-    }
-
-    const scope = effective.scopes[PermissionCode.QUESTION_CREATE];
-    if (!scope) {
-      return false;
-    }
-
-    if (scope.global) {
-      return true;
-    }
-
-    return Array.isArray(scope.subTestIds) && scope.subTestIds.includes(subTestId);
-  }
 
   private hasScopedPermission(
     effective: {
@@ -120,14 +99,22 @@ export class QuestionService {
     }
 
     const effective = await this.accessService.getEffectivePermissions(actorUserId);
-    if (!this.canCreateQuestionForSubTest(effective as any, dto.subTestId)) {
+    if (!this.hasScopedPermission(effective as any, PermissionCode.QUESTION_CREATE, dto.subTestId)) {
       throw new ForbiddenException('You do not have QUESTION_CREATE permission for this sub-test scope.');
     }
+
+    // Assign new question to the end of the subtest order
+    const maxOrderResult = await this.prisma.question.aggregate({
+      where: { subTestId: dto.subTestId, isActive: true },
+      _max: { orderIndex: true },
+    });
+    const nextOrderIndex = (maxOrderResult._max.orderIndex ?? 0) + 1;
 
     const created = await this.prisma.question.create({
       data: {
         subTestId: dto.subTestId,
         createdById: actorUserId,
+        orderIndex: nextOrderIndex,
         promptText: dto.promptText,
         materialTopic: dto.materialTopic?.trim() || null,
         imageUrl: dto.imageUrl ?? dto.imageUrls?.[0] ?? null,
@@ -175,6 +162,7 @@ export class QuestionService {
       select: {
         id: true,
         subTestId: true,
+        orderIndex: true,
         answerFormat: true,
         createdAt: true,
       },
@@ -247,7 +235,7 @@ export class QuestionService {
     }
 
     const effective = await this.accessService.getEffectivePermissions(actorUserId);
-    if (!this.canCreateQuestionForSubTest(effective as any, dto.subTestId)) {
+    if (!this.hasScopedPermission(effective as any, PermissionCode.QUESTION_CREATE, dto.subTestId)) {
       throw new ForbiddenException('You do not have QUESTION_CREATE permission for this sub-test scope.');
     }
 
@@ -310,9 +298,10 @@ export class QuestionService {
           subTestId: dto.subTestId,
           isActive: true,
         },
-        orderBy: {
-          createdAt: 'desc',
-        },
+        orderBy: [
+          { orderIndex: 'asc' },
+          { createdAt: 'asc' },
+        ],
         skip,
         take: pageSize,
       }),
@@ -519,6 +508,68 @@ export class QuestionService {
       success: true,
       deleted: true,
       question: deleted,
+    };
+  }
+
+  async reorderQuestions(actorUserId: string, dto: ReorderQuestionsDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: actorUserId } });
+    if (!user) {
+      throw new NotFoundException('Actor user not found.');
+    }
+
+    const subTest = await this.prisma.subTest.findUnique({ where: { id: dto.subTestId } });
+    if (!subTest) {
+      throw new NotFoundException('SubTest not found.');
+    }
+
+    const effective = await this.accessService.getEffectivePermissions(actorUserId);
+    const allowed =
+      this.hasScopedPermission(effective as any, PermissionCode.QUESTION_UPDATE, dto.subTestId) ||
+      this.hasScopedPermission(effective as any, PermissionCode.QUESTION_CREATE, dto.subTestId);
+
+    if (!allowed) {
+      throw new ForbiddenException('You do not have permission to reorder questions in this sub-test scope.');
+    }
+
+    // Validate all IDs belong to this subtest and are active
+    const activeQuestions = await this.prisma.question.findMany({
+      where: { subTestId: dto.subTestId, isActive: true },
+      select: { id: true },
+    });
+
+    const activeIdSet = new Set(activeQuestions.map((q) => q.id));
+    const uniqueInputIds = new Set(dto.questionIds);
+
+    if (uniqueInputIds.size !== dto.questionIds.length) {
+      throw new BadRequestException('questionIds mengandung ID duplikat.');
+    }
+
+    for (const qId of dto.questionIds) {
+      if (!activeIdSet.has(qId)) {
+        throw new BadRequestException(`Soal ${qId} tidak ditemukan atau tidak aktif di sub-tes ini.`);
+      }
+    }
+
+    if (uniqueInputIds.size !== activeIdSet.size) {
+      throw new BadRequestException(
+        `Jumlah questionIds (${uniqueInputIds.size}) tidak cocok dengan jumlah soal aktif (${activeIdSet.size}).`,
+      );
+    }
+
+    // Update orderIndex in a transaction
+    await this.prisma.$transaction(
+      dto.questionIds.map((questionId, index) =>
+        this.prisma.question.update({
+          where: { id: questionId },
+          data: { orderIndex: index + 1 },
+        }),
+      ),
+    );
+
+    return {
+      success: true,
+      subTestId: dto.subTestId,
+      reorderedCount: dto.questionIds.length,
     };
   }
 }

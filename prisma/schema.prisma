@@ -190,6 +190,7 @@ model Question {
   id                     String               @id @default(uuid())
   subTestId              String
   createdById            String
+  orderIndex             Int                  @default(0)
   promptText             String
   materialTopic          String?
   imageUrl               String?
@@ -220,6 +221,7 @@ model Question {
 
   @@index([subTestId])
   @@index([isActive])
+  @@index([subTestId, orderIndex])
 }
 
 model ExamSession {
