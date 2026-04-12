@@ -10,6 +10,7 @@ import { DeleteUserDto } from './dto/delete-user.dto';
 import { CreateParticipantTokenDto } from './dto/create-participant-token.dto';
 import { DeleteParticipantTokenDto } from './dto/delete-participant-token.dto';
 import { RegenerateParticipantTokenDto } from './dto/regenerate-participant-token.dto';
+import { ResetAntiCheatDto } from './dto/reset-anti-cheat.dto';
 
 @Controller('admin/access')
 @UseGuards(JwtAuthGuard)
@@ -133,5 +134,11 @@ export class AccessController {
   async regenerateParticipantToken(@Req() req: Request, @Body() dto: RegenerateParticipantTokenDto) {
     const actorUserId = this.getActorUserId(req);
     return this.accessService.regenerateParticipantToken(actorUserId, dto.tokenKey);
+  }
+
+  @Post('reset-anti-cheat')
+  async resetAntiCheat(@Req() req: Request, @Body() dto: ResetAntiCheatDto) {
+    const actorUserId = this.getActorUserId(req);
+    return this.accessService.resetAntiCheat(actorUserId, dto.tokenKey, dto.reason);
   }
 }

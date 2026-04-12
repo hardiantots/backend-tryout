@@ -1177,7 +1177,7 @@ export class ExamService {
         },
       });
 
-      const shouldForceSubmit = warningCount >= 3;
+      const shouldForceSubmit = warningCount >= 6;
       if (shouldForceSubmit) {
         const finalState = await this.applyForceSubmit(tx, {
           sessionId: dto.sessionId,

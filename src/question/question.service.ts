@@ -324,41 +324,57 @@ export class QuestionService {
       }),
     ]);
 
+    const itemsWithSignedUrls = await Promise.all(
+      items.map(async (item) => {
+        const rawImageUrls: string[] = Array.isArray(item.imageUrls)
+          ? (item.imageUrls as string[])
+          : item.imageUrl
+            ? [item.imageUrl]
+            : [];
+        const [signedImageUrl, ...signedImageUrls] = await this.s3Service.getSignedFileUrls([
+          item.imageUrl,
+          ...rawImageUrls,
+        ]);
+
+        return {
+          id: item.id,
+          subTestId: item.subTestId,
+          promptText: item.promptText,
+          materialTopic: item.materialTopic,
+          imageUrl: signedImageUrl,
+          imageUrls: signedImageUrls.filter(Boolean),
+          isMathContent: item.isMathContent,
+          answerFormat: item.answerFormat,
+          optionA: item.optionA,
+          optionB: item.optionB,
+          optionC: item.optionC,
+          optionD: item.optionD,
+          optionE: item.optionE,
+          correctAnswer: item.correctAnswer,
+          complexStatements: Array.isArray((item.complexCorrectJson as any)?.statements)
+            ? ((item.complexCorrectJson as any).statements as unknown[]).map((x) => String(x))
+            : [item.optionC, item.optionD, item.optionE].filter((x): x is string => Boolean(x)),
+          complexOptionLeftLabel: String((item.complexCorrectJson as any)?.labels?.left ?? item.optionA ?? 'Benar'),
+          complexOptionRightLabel: String((item.complexCorrectJson as any)?.labels?.right ?? item.optionB ?? 'Salah'),
+          complexCorrectAnswers: Array.isArray((item.complexCorrectJson as any)?.answers)
+            ? ((item.complexCorrectJson as any).answers as unknown[]).map((x) => String(x))
+            : Array.isArray(item.complexCorrectJson)
+              ? (item.complexCorrectJson as unknown[]).map((x) => String(x))
+              : [],
+          shortAnswerType: item.shortAnswerType,
+          shortAnswerKey: item.shortAnswerKey,
+          shortAnswerTolerance: item.shortAnswerTolerance,
+          shortAnswerCaseSensitive: item.shortAnswerCaseSensitive,
+          discussion: item.discussion,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+        };
+      })
+    );
+
     return {
       success: true,
-      items: items.map((item) => ({
-        id: item.id,
-        subTestId: item.subTestId,
-        promptText: item.promptText,
-        materialTopic: item.materialTopic,
-        imageUrl: item.imageUrl,
-        imageUrls: Array.isArray(item.imageUrls) ? item.imageUrls : item.imageUrl ? [item.imageUrl] : [],
-        isMathContent: item.isMathContent,
-        answerFormat: item.answerFormat,
-        optionA: item.optionA,
-        optionB: item.optionB,
-        optionC: item.optionC,
-        optionD: item.optionD,
-        optionE: item.optionE,
-        correctAnswer: item.correctAnswer,
-        complexStatements: Array.isArray((item.complexCorrectJson as any)?.statements)
-          ? ((item.complexCorrectJson as any).statements as unknown[]).map((x) => String(x))
-          : [item.optionC, item.optionD, item.optionE].filter((x): x is string => Boolean(x)),
-        complexOptionLeftLabel: String((item.complexCorrectJson as any)?.labels?.left ?? item.optionA ?? 'Benar'),
-        complexOptionRightLabel: String((item.complexCorrectJson as any)?.labels?.right ?? item.optionB ?? 'Salah'),
-        complexCorrectAnswers: Array.isArray((item.complexCorrectJson as any)?.answers)
-          ? ((item.complexCorrectJson as any).answers as unknown[]).map((x) => String(x))
-          : Array.isArray(item.complexCorrectJson)
-            ? (item.complexCorrectJson as unknown[]).map((x) => String(x))
-            : [],
-        shortAnswerType: item.shortAnswerType,
-        shortAnswerKey: item.shortAnswerKey,
-        shortAnswerTolerance: item.shortAnswerTolerance,
-        shortAnswerCaseSensitive: item.shortAnswerCaseSensitive,
-        discussion: item.discussion,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt,
-      })),
+      items: itemsWithSignedUrls,
       pagination: {
         page,
         pageSize,

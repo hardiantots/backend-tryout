@@ -893,4 +893,144 @@ export class AccessService {
       };
     });
   }
+
+  async resetAntiCheat(actorUserId: string, tokenKey: string, reason?: string) {
+    return this.prisma.$transaction(async (tx: any) => {
+      await this.assertMasterAdmin(tx, actorUserId);
+
+      const normalizedKey = tokenKey.trim().toUpperCase();
+      const token = await tx.participantAccessToken.findUnique({
+        where: { tokenKey: normalizedKey },
+        include: { user: true },
+      });
+
+      if (!token) {
+        throw new NotFoundException(`Token participant "${normalizedKey}" tidak ditemukan.`);
+      }
+
+      if (token.revokedAt) {
+        throw new BadRequestException('Token sudah nonaktif. Tidak dapat di-reset.');
+      }
+
+      // Reset loginCount to 1 so participant can login again
+      await tx.participantAccessToken.update({
+        where: { id: token.id },
+        data: { loginCount: 1 },
+      });
+
+      // Find the latest exam session for this token's user
+      const latestSession = await tx.examSession.findFirst({
+        where: { userId: token.userId },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          sectionProgresses: {
+            orderBy: { orderIndex: 'desc' },
+            include: {
+              sectionSchedule: true,
+            },
+          },
+        },
+      });
+
+      const result: Record<string, unknown> = {
+        success: true,
+        tokenKey: normalizedKey,
+        loginCountReset: true,
+        sessionRestored: false,
+        warningCountReset: false,
+        sectionTimerReset: false,
+      };
+
+      if (latestSession) {
+        // Reset warning count
+        await tx.examSession.update({
+          where: { id: latestSession.id },
+          data: { warningCount: 0 },
+        });
+        result.warningCountReset = true;
+        result.sessionId = latestSession.id;
+        result.previousStatus = latestSession.status;
+
+        // If session was force-submitted, restore it to IN_PROGRESS
+        if (latestSession.status === 'AUTO_SUBMITTED' || latestSession.status === 'SUBMITTED') {
+          await tx.examSession.update({
+            where: { id: latestSession.id },
+            data: {
+              status: 'IN_PROGRESS',
+              forceSubmitted: false,
+              submittedAt: null,
+            },
+          });
+          result.sessionRestored = true;
+          result.restoredStatus = 'IN_PROGRESS';
+        }
+
+        // Reset timer for the active section progress
+        const activeProgress = latestSession.sectionProgresses.find(
+          (p: any) => p.status === 'ACTIVE',
+        );
+
+        if (activeProgress && activeProgress.sectionSchedule) {
+          // Reset the startedAt to now, so the full duration is available again
+          await tx.sessionSectionProgress.update({
+            where: { id: activeProgress.id },
+            data: { startedAt: new Date() },
+          });
+          result.sectionTimerReset = true;
+          result.resetSectionOrder = activeProgress.orderIndex;
+          result.resetSectionDuration = activeProgress.sectionSchedule.durationSeconds;
+        } else if (result.sessionRestored) {
+          // If session was restored but no active section, reactivate the last completed section
+          const lastCompleted = latestSession.sectionProgresses.find(
+            (p: any) => p.status === 'COMPLETED',
+          );
+          if (lastCompleted) {
+            await tx.sessionSectionProgress.update({
+              where: { id: lastCompleted.id },
+              data: { status: 'ACTIVE', startedAt: new Date() },
+            });
+            result.sectionTimerReset = true;
+            result.resetSectionOrder = lastCompleted.orderIndex;
+            result.resetSectionDuration = lastCompleted.sectionSchedule?.durationSeconds;
+          }
+        }
+      }
+
+      // Write audit log
+      await this.writeAuditLog(tx, {
+        actorUserId,
+        actionType: AccessActionType.USER_LOCKED,
+        targetUserId: token.userId,
+        reason: reason ?? 'Anti-cheat reset by master admin.',
+        beforeJson: {
+          warningCount: latestSession?.warningCount ?? 0,
+          sessionStatus: latestSession?.status ?? null,
+          loginCount: token.loginCount ?? 0,
+        },
+        afterJson: {
+          warningCount: 0,
+          sessionStatus: result.restoredStatus ?? latestSession?.status ?? null,
+          loginCount: 1,
+          sectionTimerReset: result.sectionTimerReset,
+        },
+      });
+
+      await tx.proctoringEvent.create({
+        data: {
+          examSessionId: latestSession?.id ?? token.userId,
+          eventType: 'FORCE_SUBMIT_TRIGGERED',
+          warningNumber: 0,
+          metadataJson: {
+            reason: 'ANTI_CHEAT_RESET_BY_ADMIN',
+            actorUserId,
+            tokenKey: normalizedKey,
+            adminReason: reason ?? null,
+          },
+        },
+      });
+
+      return result;
+    });
+  }
 }
+
