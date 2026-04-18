@@ -82,19 +82,44 @@ export class AiService {
           }))
       : [];
 
-    const weakMaterialLine = weakMaterials.length
-      ? `Materi prioritas yang perlu kamu perbaiki: ${weakMaterials
-          .map((item: { materialTopic: string; subTestName: string }) => `${item.materialTopic} (${item.subTestName})`)
-          .join(', ')}.`
-      : 'Belum ada data materi yang cukup untuk dianalisis secara spesifik.';
+    const weakMaterialLines = weakMaterials.length
+      ? weakMaterials
+          .map(
+            (item: { materialTopic: string; subTestName: string; wrong: number; answered: number }) =>
+              `- **${item.materialTopic}** (${item.subTestName}) — ${item.wrong} dari ${item.answered} jawaban salah`,
+          )
+          .join('\n')
+      : '- Belum ada data materi yang cukup untuk dianalisis secara spesifik.';
+
+    const strongestLine = strongest.length
+      ? strongest.map((s) => `- ${s}`).join('\n')
+      : '- Belum ada sub-tes dominan karena data jawaban masih minim.';
+
+    const weakestLine = weakest.length
+      ? weakest.map((w) => `- ${w}`).join('\n')
+      : '- Semua sub-tes sudah cukup seimbang.';
 
     const narrative = [
-      'Analisis SNBT kamu menunjukkan progres yang bagus. Pertahankan ritme belajar yang konsisten.',
-      strongest.length ? `Kekuatan utama: ${strongest.join(', ')}.` : 'Belum ada sub-tes dominan karena data jawaban masih minim.',
-      weakest.length ? `Perlu ditingkatkan: ${weakest.join(', ')}.` : 'Semua sub-tes sudah cukup seimbang.',
-      weakMaterialLine,
-      'Saran belajar: prioritaskan 2 sub-tes terlemah selama 7 hari ke depan, lalu evaluasi ulang dengan try out berikutnya.',
-    ].join(' ');
+      '## Ringkasan Performa',
+      'Analisis hasil try out SNBT kamu telah selesai. Berikut adalah gambaran umum pencapaianmu saat ini.',
+      '',
+      '## Kelebihan',
+      strongestLine,
+      '',
+      '## Area yang Perlu Ditingkatkan',
+      weakestLine,
+      '',
+      '## Materi Prioritas yang Masih Lemah',
+      weakMaterialLines,
+      '',
+      '## Saran Belajar 7 Hari ke Depan',
+      '- Fokus pada 2 sub-tes dengan akurasi terendah selama 7 hari ke depan.',
+      '- Kerjakan minimal 20 soal latihan per hari untuk materi prioritas yang masih lemah.',
+      '- Evaluasi ulang progres dengan try out berikutnya setelah periode belajar selesai.',
+      '',
+      '## Motivasi Penutup',
+      'Setiap soal yang kamu kerjakan adalah investasi untuk hasil yang lebih baik. Tetap konsisten, dan hasil nyata akan mengikuti.',
+    ].join('\n');
 
     return { strongest, weakest, weakMaterials, narrative };
   }
@@ -134,9 +159,9 @@ export class AiService {
         headers,
         body: JSON.stringify({
           model,
-          temperature: 0.7,
-          max_tokens: 500,
-          top_p: 0.9,
+          temperature: 0.65,
+          max_tokens: 900,
+          top_p: 0.92,
           messages: [
             {
               role: 'system',
@@ -218,50 +243,95 @@ export class AiService {
   }
 
   private buildPrompt(summary: any, strongest: string[], weakest: string[]): string {
+    const bySubTest = summary?.bySubTest ?? {};
+    const subTestLines = Object.entries(bySubTest)
+      .map(([code, val]: [string, any]) => {
+        const correct = Number(val?.correct ?? 0);
+        const wrong = Number(val?.wrong ?? 0);
+        const total = Number(val?.total ?? 0);
+        const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
+        return `- ${code}: Benar ${correct}, Salah ${wrong}, Total ${total}, Akurasi ${accuracy}%`;
+      })
+      .join('\n');
+
+    const totals = summary?.totals ?? {};
     const weakMaterials = Array.isArray(summary?.weakMaterials)
       ? summary.weakMaterials
-          .slice(0, 5)
-          .map((item: any) => `${item.subTestName ?? item.subTestCode}: ${item.materialTopic}`)
-          .join('; ')
-      : 'belum tersedia';
+          .slice(0, 6)
+          .map(
+            (item: any) =>
+              `- ${item.subTestName ?? item.subTestCode} — ${item.materialTopic}: ${item.wrong} salah dari ${item.answered} dijawab`,
+          )
+          .join('\n')
+      : '(belum tersedia)';
 
     return [
-      'Berikut data hasil try out SNBT:',
-      JSON.stringify(summary),
-      `Sub-tes terkuat sementara: ${strongest.join(', ') || 'belum ada'}.`,
-      `Sub-tes terlemah sementara: ${weakest.join(', ') || 'belum ada'}.`,
-      `Materi dengan performa terlemah: ${weakMaterials}.`,
-      'PENTING: Berikan jawaban plain text saja (tanpa markdown, tanpa simbol dekoratif, tanpa emoji).',
-      'Berikan output maksimal 220 kata dengan format:',
-      '- Evaluasi singkat performa berdasarkan data.',
-      '- Prioritas belajar 7 hari dalam 3 poin (awali tiap poin dengan simbol "•").',
-      '- Sebutkan materi prioritas yang masih lemah (maksimal 3 materi) dan alasan singkatnya.',
-      '- Motivasi penutup yang konkret dan realistis.',
-      'Gunakan kata "kamu", bukan "Anda".',
+      '## Data Hasil Try Out SNBT Peserta',
+      `Total: Benar ${totals.correct ?? 0}, Salah ${totals.wrong ?? 0}, Dijawab ${totals.answered ?? 0}`,
+      '',
+      '### Skor Per Sub-Tes:',
+      subTestLines,
+      '',
+      `### Sub-tes dengan performa terbaik: ${strongest.join(', ') || 'belum ada'}`,
+      `### Sub-tes dengan performa terlemah: ${weakest.join(', ') || 'belum ada'}`,
+      '',
+      '### Materi yang paling banyak salah:',
+      weakMaterials,
+      '',
+      '---',
+      'Kamu adalah mentor SNBT berpengalaman. Berdasarkan data di atas, buatlah analisis mendalam dengan format Markdown berikut (WAJIB gunakan heading ##, bold **, dan bullet -).',
+      '',
+      'INSTRUKSI FORMAT (ikuti persis):',
+      '## Ringkasan Performa',
+      '(2-3 kalimat evaluasi objektif berdasarkan data: skor keseluruhan, akurasi rata-rata, apakah sudah cukup baik atau masih perlu banyak perbaikan)',
+      '',
+      '## Kelebihan',
+      '(2-3 poin bullet berisi sub-tes atau kemampuan yang sudah baik beserta alasan spesifik berdasarkan data)',
+      '',
+      '## Area yang Perlu Ditingkatkan',
+      '(2-3 poin bullet berisi sub-tes terlemah beserta penjelasan mengapa perlu fokus dan dampaknya pada total skor)',
+      '',
+      '## Materi Prioritas yang Masih Lemah',
+      '(3-5 poin bullet berisi nama materi spesifik, sub-tes terkait, jumlah salah, dan saran singkat cara memperbaikinya)',
+      '',
+      '## Saran Belajar 7 Hari ke Depan',
+      '(3-4 poin bullet berisi rencana belajar konkret dan actionable: waktu, materi, metode latihan)',
+      '',
+      '## Motivasi Penutup',
+      '(1-2 kalimat motivasi yang konkret, bukan klise, berbasis pencapaian yang sudah ditunjukkan data)',
+      '',
+      'ATURAN PENTING:',
+      '- Gunakan kata "kamu", bukan "Anda".',
+      '- Setiap heading harus diawali dengan ## (dua tanda pagar).',
+      '- Setiap poin harus diawali dengan - (tanda hubung dan spasi).',
+      '- Pisahkan setiap section dengan baris kosong.',
+      '- Jangan tambahkan penjelasan di luar format di atas.',
+      '- Tulis dalam bahasa Indonesia yang natural dan memotivasi.',
     ].join('\n');
   }
 
   private normalizeNarrative(text: string): string {
     return text
-      .replace(/\r/g, '')
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '$1 ($2)')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      // Remove raw URL links but keep label text
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '$1')
+      // Remove pipe chars (table artifacts)
       .replace(/\|/g, ' ')
-      .replace(/^#{1,6}\s*/gm, '')
-      .replace(/^>\s?/gm, '')
+      // Remove horizontal rules that aren't section breaks we want
       .replace(/^---+$/gm, '')
+      // Remove emoji
       .replace(/[\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, '')
-      .replace(/\*\*(.*?)\*\*/g, '$1')
-      .replace(/__(.*?)__/g, '$1')
-      .replace(/\*(.*?)\*/g, '$1')
-      .replace(/_(.*?)_/g, '$1')
-      .replace(/~~(.*?)~~/g, '$1')
-      .replace(/`([^`]+)`/g, '$1')
+      // Normalize escaped markdown chars
       .replace(/\\([*_`#\-])/g, '$1')
-      .replace(/^[-*]\s+/gm, '• ')
-      .replace(/^\d+[.)]\s+/gm, '• ')
-      .replace(/^[^\p{L}\p{N}(•\-)]*/gmu, '')
-      .replace(/\s{2,}/g, ' ')
+      // Ensure ## headings always have a blank line before them (except at start)
+      .replace(/\n(#{1,6} )/g, '\n\n$1')
+      // Ensure blank line after each heading
+      .replace(/(#{1,6} [^\n]+)/g, '$1\n')
+      // Collapse more than 2 consecutive blank lines
       .replace(/\n{3,}/g, '\n\n')
+      // Remove trailing spaces per line
+      .replace(/[ \t]+$/gm, '')
       .trim();
   }
 }
