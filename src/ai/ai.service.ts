@@ -28,7 +28,7 @@ export class AiService {
     const summary = (session.scoreSummaryJson as any) ?? { bySubTest: {}, totals: { correct: 0, wrong: 0, answered: 0 } };
 
     const fallbackInsight = await this.buildFallbackInsight(summary);
-    const llmNarrative = await this.generateWithLlm(summary, fallbackInsight.strongest, fallbackInsight.weakest);
+    const llmNarrative = await this.generateWithLlm(summary, fallbackInsight.strongest, fallbackInsight.weakest, fallbackInsight.nameMap);
     const narrative = this.normalizeNarrative(llmNarrative ?? fallbackInsight.narrative);
 
     return {
@@ -51,6 +51,7 @@ export class AiService {
     weakest: string[];
     weakMaterials: Array<{ subTestCode: string; subTestName: string; materialTopic: string; wrong: number; answered: number }>;
     narrative: string;
+    nameMap: Map<string, string>;
   }> {
     const bySubTest = summary.bySubTest ?? {};
     const subTests = await this.prisma.subTest.findMany({
@@ -121,10 +122,10 @@ export class AiService {
       'Setiap soal yang kamu kerjakan adalah investasi untuk hasil yang lebih baik. Tetap konsisten, dan hasil nyata akan mengikuti.',
     ].join('\n');
 
-    return { strongest, weakest, weakMaterials, narrative };
+    return { strongest, weakest, weakMaterials, narrative, nameMap };
   }
 
-  private async generateWithLlm(summary: any, strongest: string[], weakest: string[]): Promise<string | null> {
+  private async generateWithLlm(summary: any, strongest: string[], weakest: string[], nameMap: Map<string, string>): Promise<string | null> {
     const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY;
     const model = process.env.LLM_MODEL || process.env.AI_MODEL || 'google/gemini-2.5-flash-lite';
 
@@ -142,7 +143,7 @@ export class AiService {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    const userPrompt = this.buildPrompt(summary, strongest, weakest);
+    const userPrompt = this.buildPrompt(summary, strongest, weakest, nameMap);
 
     try {
       const headers: Record<string, string> = {
@@ -242,15 +243,16 @@ export class AiService {
     return rawBody;
   }
 
-  private buildPrompt(summary: any, strongest: string[], weakest: string[]): string {
+  private buildPrompt(summary: any, strongest: string[], weakest: string[], nameMap: Map<string, string>): string {
     const bySubTest = summary?.bySubTest ?? {};
     const subTestLines = Object.entries(bySubTest)
       .map(([code, val]: [string, any]) => {
+        const name = nameMap.get(code) ?? code;
         const correct = Number(val?.correct ?? 0);
         const wrong = Number(val?.wrong ?? 0);
         const total = Number(val?.total ?? 0);
         const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
-        return `- ${code}: Benar ${correct}, Salah ${wrong}, Total ${total}, Akurasi ${accuracy}%`;
+        return `- ${name} (${code}): Benar ${correct}, Salah ${wrong}, Total ${total}, Akurasi ${accuracy}%`;
       })
       .join('\n');
 
